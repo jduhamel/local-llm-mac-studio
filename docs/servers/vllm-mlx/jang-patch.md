@@ -1,6 +1,8 @@
 # vllm-mlx JANG Model Support Patch
 
-Step-by-step guide to run JANG-quantized models on [vllm-mlx](https://github.com/vllm-project/vllm-mlx) (v0.2.6).
+Step-by-step guide to run JANG-quantized models on [vllm-mlx](https://github.com/vllm-project/vllm-mlx).
+
+> **Version note:** written for v0.2.6; re-verified on **0.4.0rc1** (git `HEAD`, 2026-06). On 0.4.0rc1 the step-3 return-bug patch is obsolete (already fixed), and the wrapper only takes effect for **text-only** JANG checkpoints — see step 3 and [Limitations](#limitations).
 
 ## Index
 - [Background](#background)
@@ -98,7 +100,13 @@ vllm-mlx requires Python 3.10+. Use Homebrew Python 3.12:
 ~/vllm-mlx-env/bin/pip install 'jang[mlx]>=0.1.0'
 ```
 
-#### 3. Fix the missing return bug (v0.2.6)
+#### 3. Fix the missing return bug (v0.2.6 only — skip on 0.4.0rc1)
+
+> **Check the version first.** On **0.4.0rc1** this is already fixed — the success path runs `_try_inject_mtp_post_load(model, model_name)` then `return model, tokenizer`. Applying the patch below would insert an early return and **break MTP injection**. Always grep the function before patching:
+> ```bash
+> grep -n -A3 'model, tokenizer = load(model_name' ~/vllm-mlx-env/lib/python3.12/site-packages/vllm_mlx/utils/tokenizer.py
+> ```
+> If you already see a `return model, tokenizer` (immediately, or after `_try_inject_mtp_post_load`), the bug is fixed — skip to step 4.
 
 vllm-mlx v0.2.6 has a bug where `load_model_with_fallback()` does not return the model after a successful `mlx_lm.load()` call. Patch it:
 
@@ -234,10 +242,11 @@ pkill -f run_vllm_jang
 
 ## ⚠️ Limitations
 
+- **Text-only JANG checkpoints only (0.4.0rc1):** The wrapper patches `mlx_lm.load`, but 0.4.0rc1 routes `*ForConditionalGeneration` archs (`gemma4` VLM, `qwen3_5_moe`) through the `mlx_vlm` loader, which never calls `mlx_lm.load` — so the JANG patch is silently bypassed. Symptoms: Gemma-4-31B-JANG → `Received 2010 parameters not in model` (vision tower); Qwen3.6-35B-A3B-JANGTQ → `KeyError: ...experts.gate_up_proj` in `mlx_vlm/models/qwen3_5_moe.py`. Serve TurboQuant/JANGTQ MoE models on **vmlx** instead. Use a plain text JANG checkpoint (e.g. `JANGQ-AI/Qwen3.6-27B-JANG_4M`) here.
 - **Single model only:** `vllm-mlx serve` loads one model at startup.
 - **Separate venv required:** Cannot share the oMLX Homebrew venv (Python 3.11 vs 3.12, different mlx-lm versions).
 - **Model name is the full path:** The API model ID is the local filesystem path.
-- **v0.2.6 return bug:** Must patch `vllm_mlx/utils/tokenizer.py` after install (see step 3 above). Future versions may fix this.
+- **v0.2.6 return bug (fixed in 0.4.0rc1):** On 0.2.6, patch `vllm_mlx/utils/tokenizer.py` after install (see step 3 above). On 0.4.0rc1 it is already fixed — do not patch.
 - **No admin dashboard:** No web UI for model management.
 - **Not a persistent service:** Must be started manually via CLI commands above.
 

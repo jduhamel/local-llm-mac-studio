@@ -19,9 +19,9 @@
 
 | Property | Value |
 |----------|-------|
-| Version | 0.2.6 |
+| Version | 0.2.6 (original runbook) / **0.4.0rc1** (current git `HEAD`, verified 2026-06) |
 | Repository | [waybarrios/vllm-mlx](https://github.com/waybarrios/vllm-mlx) |
-| Python | 3.10+ (requires Homebrew Python 3.12 on Mac Studio) |
+| Python | 3.10+ (system Python 3.9 too old). Use Homebrew `python3.12`, or `uv venv --python 3.12` if no 3.12 is installed. |
 | Framework | MLX + Uvicorn/FastAPI |
 | API formats | OpenAI-compatible `/v1/chat/completions`, Anthropic-format `/v1/messages` (native) |
 | Model formats | MLX safetensors, JANG (via monkey-patch) |
@@ -60,14 +60,21 @@ vllm-mlx wraps `mlx_lm` model loading and `stream_generate()` with an async Uvic
 vllm-mlx requires Python 3.10+. Mac Studio's system Python is 3.9.6, so use Homebrew Python:
 
 ```bash
+# Homebrew python3.12 if present:
 /opt/homebrew/bin/python3.12 -m venv ~/vllm-mlx-env
 ~/vllm-mlx-env/bin/pip install --upgrade pip
 ~/vllm-mlx-env/bin/pip install 'git+https://github.com/waybarrios/vllm-mlx.git'
+
+# Or, if no python3.12 is installed, let uv fetch it (keeps lib/python3.12/ paths intact):
+uv venv --python 3.12 ~/vllm-mlx-env
+uv pip install --python ~/vllm-mlx-env/bin/python 'git+https://github.com/waybarrios/vllm-mlx.git'
 ```
 
-### Fix missing return bug (v0.2.6)
+### Fix missing return bug (v0.2.6 only — obsolete on 0.4.0rc1)
 
-vllm-mlx v0.2.6 has a bug where `load_model_with_fallback()` in `vllm_mlx/utils/tokenizer.py` does not return the model tuple after a successful `mlx_lm.load()`. See [jang-patch.md](jang-patch.md#3-fix-the-missing-return-bug-v026) for the one-line fix.
+vllm-mlx v0.2.6 had a bug where `load_model_with_fallback()` in `vllm_mlx/utils/tokenizer.py` did not return the model tuple after a successful `mlx_lm.load()`. See [jang-patch.md](jang-patch.md#3-fix-the-missing-return-bug-v026) for the one-line fix.
+
+> **Do not apply this patch on 0.4.0rc1.** The success path is already correct (`_try_inject_mtp_post_load(...)` then `return model, tokenizer`). The old patch would short-circuit the MTP injection. Always `grep` the function before patching — see jang-patch.md step 3.
 
 ### Install JANG support (optional)
 
@@ -168,6 +175,8 @@ curl -s http://<MAC_STUDIO_IP>:8000/v1/chat/completions \
 
 Not supported natively. Requires a monkey-patch wrapper script. See [jang-patch.md](jang-patch.md) for step-by-step instructions.
 
+> **0.4.0rc1 caveat — the JANG wrapper only works for text-only `JANG_4M`/`JANG_4K` checkpoints.** The wrapper patches `mlx_lm.load`, but 0.4.0rc1 routes anything it classifies as multimodal/MoE — `gemma4` (VLM) and `qwen3_5_moe` (`*ForConditionalGeneration`) — through its `mlx_vlm` loader, which never calls `mlx_lm.load`, so the patch is bypassed. Observed on this box: Gemma-4-31B-JANG → MLLM loader rejects the 2010 vision-tower weights; Qwen3.6-35B-A3B-JANGTQ → `mlx_vlm/models/qwen3_5_moe.py` `KeyError: ...experts.gate_up_proj`. TurboQuant (JANGTQ) MoE models are the **vmlx** server's job, not vllm-mlx. A plain text JANG checkpoint such as `JANGQ-AI/Qwen3.6-27B-JANG_4M` takes the patched `mlx_lm.load` path correctly.
+
 ---
 
 ## 🔧 Tool Calling & Reasoning (Qwen3.5)
@@ -205,13 +214,14 @@ find ~/vllm-mlx-env/lib/python3.12/site-packages/vllm_mlx/__pycache__/ -name 'se
 
 ## ⚠️ Known Issues
 
-1. **v0.2.6 return bug:** `load_model_with_fallback()` missing return statement. Must patch after install.
-2. **Single model per instance:** Only one model loaded at a time. No hot-swapping.
-3. **No persistent service:** Must be started manually (see [Usage](#usage) for start/stop commands).
-4. **Separate venv from oMLX:** Cannot share the oMLX Homebrew Python environment (version conflict).
-5. **JANG not native:** Requires monkey-patch wrapper for JANG models.
-6. **Model ID is full path:** When using local model paths, the API model ID is the filesystem path.
-7. **Qwen3.5 tool calls need `qwen3_coder` parser:** See [Tool Calling & Reasoning](#-tool-calling--reasoning-qwen35) above.
+1. **v0.2.6 return bug (fixed in 0.4.0rc1):** `load_model_with_fallback()` missing return statement. Patch on 0.2.6 only; on 0.4.0rc1 it is already fixed and patching breaks MTP injection.
+2. **0.4.0rc1 MoE/VLM routing:** `qwen3_5_moe` and other `*ForConditionalGeneration` archs load via the `mlx_vlm` path. Dense `qwen3_5` (e.g. `Qwen3.6-27B-6bit`) loads and serves fine; MoE `qwen3_5_moe` checkpoints hit `KeyError: ...experts.gate_up_proj`. This path also bypasses the JANG monkey-patch (see [JANG Model Support](#-jang-model-support)).
+3. **Single model per instance:** Only one model loaded at a time. No hot-swapping.
+4. **No persistent service:** Must be started manually (see [Usage](#usage) for start/stop commands).
+5. **Separate venv from oMLX:** Cannot share the oMLX Homebrew Python environment (version conflict).
+6. **JANG not native:** Requires monkey-patch wrapper for JANG models.
+7. **Model ID is full path:** When using local model paths, the API model ID is the filesystem path.
+8. **Qwen3.5 tool calls need `qwen3_coder` parser:** See [Tool Calling & Reasoning](#-tool-calling--reasoning-qwen35) above.
 
 ## 🧩 Nemotron Support
 
