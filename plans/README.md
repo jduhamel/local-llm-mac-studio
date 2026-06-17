@@ -17,19 +17,17 @@ Plans are design notes and work queues. They are **not** live runbooks and shoul
 | Plan | Topic |
 |:--|:--|
 | [`active/plan-bench-eval-local.md`](active/plan-bench-eval-local.md) | MMLU-Pro + TruthfulQA-gen local benchmark driver (`bench_eval_local.py`) |
-| [`active/plan-comfyui-zanime-sidecar.md`](active/plan-comfyui-zanime-sidecar.md) | ComfyUI sidecar (port 8188) for Z-Image / Z-Anime image generation — qwen-asr-style minimal posture, no OpenAI shim |
-| [`active/plan-deploy-llama-cpp-mtp-sidecar-qwen36-27b.md`](active/plan-deploy-llama-cpp-mtp-sidecar-qwen36-27b.md) | New `llama-cpp-mtp` sidecar (port 8100) — `unsloth/Qwen3.6-27B-MTP-GGUF:UD-Q6_K_XL` on `am17an/llama.cpp@mtp-clean` (PR #22673), self-drafting speculative decoding |
-| [`active/plan-chk-llm-macstu.md`](active/plan-chk-llm-macstu.md) | `scripts/chk_llm_macstu.py` — Mac Studio LLM server + model status probe with `--client` / `--logs` / `--all` emit modes |
-| [`active/plan-deploy-run-benchmark-model-skill.md`](active/plan-deploy-run-benchmark-model-skill.md) | `/deploy-run-benchmark-model` skill — universal deploy + benchmark runner with disk guard and censored / uncensored branching |
-| [`active/plan-dflash-regression-investigation.md`](active/plan-dflash-regression-investigation.md) | Diagnose and fix DFlash regression on Mac Studio M3 Ultra |
-| [`active/plan-list-model-to-remove.md`](active/plan-list-model-to-remove.md) | `/list-model-to-remove` skill — interactive model audit + cleanup across HF / LM Studio / oMLX / hauhau-gguf |
+| [`active/plan-holo31-macstudio-computer-use-eval.md`](active/plan-holo31-macstudio-computer-use-eval.md) | Select Holo 3.1 MLX/GGUF variants for Mac Studio and build a staged computer-use benchmark |
+| [`active/plan-ideogram4-macstudio-eval.md`](active/plan-ideogram4-macstudio-eval.md) | Ideogram 4 FP8 on ComfyUI/MPS plus an agent-style design-redesign benchmark |
 | [`active/plan-lm-studio-uncen-benchmark.md`](active/plan-lm-studio-uncen-benchmark.md) | lm-studio uncensored-model benchmark slate |
-| [`active/plan-lora-ops-copilot.md`](active/plan-lora-ops-copilot.md) | LoRA "Mac Studio ops copilot" — PEFT/TRL adapter on `Qwen3.5-2B` for repo-specific ops Q&A, MacBook M1 Pro 16GB inference |
 | [`active/plan-lobehub-macstudio-setup.md`](active/plan-lobehub-macstudio-setup.md) | LobeHub config against Mac Studio servers |
-| [`active/plan-osaurus-qwen36-jangtq4-vmlx-agent-bench.md`](active/plan-osaurus-qwen36-jangtq4-vmlx-agent-bench.md) | Deploy Osaurus Qwen3.6-35B-A3B JANGTQ4 as main vmlx server and run OpenCode agent benchmark |
+| [`active/plan-lora-ops-copilot.md`](active/plan-lora-ops-copilot.md) | LoRA "Mac Studio ops copilot" — PEFT/TRL adapter on `Qwen3.5-2B` for repo-specific ops Q&A, MacBook M1 Pro 16GB inference |
+| [`active/plan-mlx-vlm-qwen-vl-deploy-benchmark.md`](active/plan-mlx-vlm-qwen-vl-deploy-benchmark.md) | Update `mlx-vlm`, deploy Qwen VL 4-bit sidecar, then run agent tooling and visual-agent benchmarks |
+| [`active/plan-reorganise-repo-structure.md`](active/plan-reorganise-repo-structure.md) | Re-organise scripts, docs, and folders — fix post-April-2026 drift ([visual HTML](active/plan-reorganise-repo-structure.html)) |
 | [`active/plan-rotorquant-apple-silicon-implementation.md`](active/plan-rotorquant-apple-silicon-implementation.md) | RotorQuant feasibility on Apple Silicon |
 | [`active/plan-switch-server.md`](active/plan-switch-server.md) | Server/model switcher script design |
 | [`active/plan-turboquant-mlx-implementation.md`](active/plan-turboquant-mlx-implementation.md) | TurboQuant feasibility and implementation plan |
+| [`active/plan-vlm-visual-agent-benchmark-harness.md`](active/plan-vlm-visual-agent-benchmark-harness.md) | Visual-agent benchmark harness for OCR, chart, screenshot, and video tasks with HITL fixture review |
 | [`active/plan-vllm-mlx-homebrew-formula.md`](active/plan-vllm-mlx-homebrew-formula.md) | vllm-mlx Homebrew formula/tap |
 
 ### Done
@@ -44,12 +42,31 @@ Plans are design notes and work queues. They are **not** live runbooks and shoul
 | [`done/plan-gemma-4-31b-lm-studio.md`](done/plan-gemma-4-31b-lm-studio.md) | Deploy Gemma 4 31B-it on lm-studio + 3 benchmarks (shipped 2026-05-01) — agent-loop champion at 5–6 s wall |
 | [`done/plan-deploy-run-benchmark-uncen-model-skill.md`](done/plan-deploy-run-benchmark-uncen-model-skill.md) | `/deploy-run-benchmark-uncen-model` skill — six-phase deploy + bench + docs runner, shipped 2026-05-02 to `~/.claude/skills/deploy-run-benchmark-uncen-model/` |
 | [`done/plan-list-model-to-remove-python.md`](done/plan-list-model-to-remove-python.md) | `scripts/list_model_to_remove.py` — LLM-free Python port of `/list-model-to-remove`, verified by dry run against Mac Studio |
+| [`done/plan-deploy-huihui-qwen36-35b-mtp-abliterated.md`](done/plan-deploy-huihui-qwen36-35b-mtp-abliterated.md) | huihui-ai Qwen3.6-35B-A3B Claude-4.7-Opus-abliterated MTP Q6_K — first MoE+MTP on llama-cpp-mtp, shipped 2026-05-20 with benchmarks |
+| [`done/plan-chk-llm-macstu.md`](done/plan-chk-llm-macstu.md) | `scripts/chk_llm_macstu.py` — Mac Studio LLM server + model status probe (shipped 2026-05-04) |
+| [`done/plan-comfyui-zanime-sidecar.md`](done/plan-comfyui-zanime-sidecar.md) | ComfyUI sidecar (port 8188) for Z-Image / Z-Anime — shipped 2026-05-08, runbook at `docs/servers/comfyui/summary.md` |
+| [`done/plan-deploy-llama-cpp-mtp-sidecar-qwen36-27b.md`](done/plan-deploy-llama-cpp-mtp-sidecar-qwen36-27b.md) | `llama-cpp-mtp` sidecar (port 8100) with Qwen3.6-27B-MTP UD-Q6_K_XL — shipped 2026-05-14 |
+| [`done/plan-list-model-to-remove.md`](done/plan-list-model-to-remove.md) | `/list-model-to-remove` skill design — shipped 2026-06-02 (`scripts/list_model_to_remove.py`) |
+| [`done/plan-deploy-run-benchmark-model-skill.md`](done/plan-deploy-run-benchmark-model-skill.md) | `/deploy-run-benchmark-model` skill — shipped 2026-05-05, handles censored + uncensored models |
+| [`done/plan-dflash-regression-investigation.md`](done/plan-dflash-regression-investigation.md) | DFlash regression on M3 Ultra — concluded 2026-04-30: regresses vs baseline, upstream-tracking only |
+| [`done/plan-osaurus-qwen36-jangtq4-vmlx-agent-bench.md`](done/plan-osaurus-qwen36-jangtq4-vmlx-agent-bench.md) | Osaurus Qwen3.6-35B-A3B JANGTQ4 via vmlx — shipped 2026-05-14 with agent benchmarks |
+| [`done/plan-upgrade-llama-cpp-benchmark-gemma4-31b-mtp.md`](done/plan-upgrade-llama-cpp-benchmark-gemma4-31b-mtp.md) | llama.cpp upgrade + Gemma 4 31B dense MTP benchmark — completed 2026-06-10 |
+| [`done/plan-huggingface-skills-analysis.md`](done/plan-huggingface-skills-analysis.md) | Hugging Face skills (hf-cli, HF datasets) fitness assessment for this repo — concluded 2026-05-15 |
 
 ### Archive
 
 | Plan | Topic |
 |:--|:--|
 | [`archive/plan-itermai-omlx-setup.md`](archive/plan-itermai-omlx-setup.md) | iTermAI to oMLX setup notes |
+
+### Prompts
+
+Reusable prompts for driving planning sessions. Not plans themselves — pass to an agent or use as a starting point.
+
+| File | Purpose |
+|:--|:--|
+| [`prompts/build-adjust-active-plans.md`](prompts/build-adjust-active-plans.md) | Prompt for creating or revising active plans under `plans/active/` |
+| [`prompts/fine-tuning-PEFT-LoRA-experiments.md`](prompts/fine-tuning-PEFT-LoRA-experiments.md) | Prompts for planning focused PEFT/LoRA experiments (behavior specialization, not compression) |
 
 ## Plan Metadata
 
