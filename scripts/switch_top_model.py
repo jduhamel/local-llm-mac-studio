@@ -22,6 +22,22 @@ Usage:
     python3 scripts/switch_top_model.py --list                # print the top-5 menus and exit
     python3 scripts/switch_top_model.py --ssh-host macstudio-ts --pick hybrid:1
 
+Host portability: every remote command runs under `bash -lc`, so a host whose login
+shell is fish (e.g. scotland) still executes the bash-syntax recipes. The SSH alias, the
+LM Studio data dir, the guardrail mode to restore after a load, and the two directory
+roots the recipes reference are all configurable via flags (`--ssh-host`, `--lms-dir`,
+`--guardrail-restore`, `--stack-dir`, `--models-dir`) or the matching env vars
+(`MACSTUDIO_SSH_HOST`, `MACSTUDIO_LMS_DIR`, `MACSTUDIO_GUARDRAIL_RESTORE`,
+`MACSTUDIO_STACK_DIR`, `MACSTUDIO_MODELS_DIR`); the defaults target the upstream author's
+host (macstudio, ~/.lmstudio, high, ~, ~/.lmstudio/models). LAUNCH_RECIPES still lists
+that author's model roster — prune it to the models actually on your host.
+
+Recipe paths are written with two placeholders instead of hardcoded homedir paths:
+`{stack}` (where source-built runtimes live — llama.cpp forks, sglang; see
+scripts/install_stack.sh) and `{models}` (the LM Studio downloadsFolder / GGUF tree).
+Both are substituted just before a command is sent, so relocating either tree is a flag
+change, not a recipe edit. scotland: `--stack-dir ~/Stack --models-dir ~/Models`.
+
 On a `wait_ready` timeout the last lines of the target's remote log are tailed automatically
 (even without --debug) — the timeout is the one place something is known-wrong and the log is
 the only evidence. --debug additionally traces table parse, recipe match, every SSH call's
@@ -36,7 +52,9 @@ Exit codes:
 
 import argparse
 import json
+import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -109,8 +127,13 @@ SMOKE_TOOL = {
 # `server` = configs/clients/<folder> + label used by switch_opencode_config.
 # `model_id` = served id (API /v1/models id AND opencode model_override).
 # kind="lms"        → LM Studio guardrail-dance load by `lms_key`.
-# kind="remote-cmd" → run `start_cmd` verbatim; availability-checked via `gguf_path`.
+# kind="remote-cmd" → run `start_cmd` verbatim; availability-checked via `gguf_path`
+#                     (a str, or a list of candidate paths — present at any one passes).
 # `server_match` (optional) disambiguates rows that share a model name across servers.
+#
+# `start_cmd` / `gguf_path` may use two placeholders, expanded per-host at send time:
+#   {stack}   source-built runtime root (--stack-dir,  default ~)
+#   {models}  GGUF / MLX model tree     (--models-dir, default ~/.lmstudio/models)
 # ---------------------------------------------------------------------------
 LAUNCH_RECIPES = [
     # ---- 🔀 MoE ----
@@ -147,10 +170,10 @@ LAUNCH_RECIPES = [
         "server": "llama-cpp-mtp", "port": 8100, "server_match": "llama-cpp",
         "model_id": "gemma4-26b-a4b-q8-stock-llamacpp",
         "kind": "remote-cmd",
-        "gguf_path": "~/.lmstudio/models/lmstudio-community/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q8_0.gguf",
+        "gguf_path": "{models}/lmstudio-community/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q8_0.gguf",
         "start_cmd": (
-            'GGUF=~/.lmstudio/models/lmstudio-community/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q8_0.gguf; '
-            'nohup ~/llama-cpp-mainline/build/bin/llama-server -m "$GGUF" -ngl 99 -fa on -np 1 -c 65536 '
+            'GGUF={models}/lmstudio-community/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q8_0.gguf; '
+            'nohup {stack}/llama-cpp-mainline/build/bin/llama-server -m "$GGUF" -ngl 99 -fa on -np 1 -c 65536 '
             '--host 0.0.0.0 --port 8100 --alias gemma4-26b-a4b-q8-stock-llamacpp --jinja '
             '> /tmp/llama-cpp-mtp.log 2>&1 &'
         ),
@@ -161,10 +184,13 @@ LAUNCH_RECIPES = [
         "server": "llama-cpp-mtp", "port": 8100,
         "model_id": "huihui-qwen36-35b-mtp-abliterated-q6k",
         "kind": "remote-cmd",
-        "gguf_path": "~/.cache/huggingface/hub/models--huihui-ai--Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-MTP-GGUF/snapshots/main/Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-ggml-model-Q6_K.gguf",
+        # Snapshot dir is the revision sha for a plain `hf download`; upstream's host has it
+        # as `main`. Glob the snapshot level so either layout resolves — the disk check
+        # therefore tests the repo dir (a glob would break `test -e` on multiple matches).
+        "gguf_path": "~/.cache/huggingface/hub/models--huihui-ai--Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-MTP-GGUF",
         "start_cmd": (
-            'GGUF=~/.cache/huggingface/hub/models--huihui-ai--Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-MTP-GGUF/snapshots/main/Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-ggml-model-Q6_K.gguf; '
-            'nohup ~/llama-cpp-mainline/build/bin/llama-server -m "$GGUF" -ngl 99 -fa on -np 1 -c 32768 '
+            'GGUF=$(ls ~/.cache/huggingface/hub/models--huihui-ai--Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-MTP-GGUF/snapshots/*/Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-ggml-model-Q6_K.gguf 2>/dev/null | head -1); '
+            'nohup {stack}/llama-cpp-mainline/build/bin/llama-server -m "$GGUF" -ngl 99 -fa on -np 1 -c 32768 '
             '--spec-type draft-mtp --spec-draft-n-max 2 --host 0.0.0.0 --port 8100 '
             '--alias huihui-qwen36-35b-mtp-abliterated-q6k --jinja --reasoning on '
             '> /tmp/llama-cpp-mtp.log 2>&1 &'
@@ -196,10 +222,17 @@ LAUNCH_RECIPES = [
         "server": "llama-cpp-turboquant", "port": 8099,
         "model_id": "qwen3.6-35b-a3b-turboquant-turbo3",
         "kind": "remote-cmd",
-        "gguf_path": "~/.cache/huggingface/hub/models--unsloth--Qwen3.6-35B-A3B-GGUF",
+        # Two homes for the same blob: `hf download --local-dir` (scripts/fetch.sh) puts it
+        # under the model tree, a bare `hf download` leaves it in the HF cache. Accept either.
+        "gguf_path": [
+            "{models}/unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q6_K.gguf",
+            "~/.cache/huggingface/hub/models--unsloth--Qwen3.6-35B-A3B-GGUF",
+        ],
         "start_cmd": (
-            'GGUF=$(ls ~/.cache/huggingface/hub/models--unsloth--Qwen3.6-35B-A3B-GGUF/snapshots/*/Qwen3.6-35B-A3B-UD-Q6_K.gguf); '
-            'nohup ~/llama-cpp-thetom/build/bin/llama-server -m "$GGUF" '
+            'GGUF=$({ ls {models}/unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q6_K.gguf || '
+            'ls ~/.cache/huggingface/hub/models--unsloth--Qwen3.6-35B-A3B-GGUF/snapshots/*/Qwen3.6-35B-A3B-UD-Q6_K.gguf; '
+            '} 2>/dev/null | head -1); '
+            'nohup {stack}/llama-cpp-thetom/build/bin/llama-server -m "$GGUF" '
             '--cache-type-k turbo3 --cache-type-v turbo3 -ngl 99 -fa on '
             '--host 0.0.0.0 --port 8099 --alias qwen3.6-35b-a3b-turboquant-turbo3 -c 65536 --jinja '
             '> /tmp/llama-cpp-thetom.log 2>&1 &'
@@ -234,7 +267,7 @@ LAUNCH_RECIPES = [
         "kind": "remote-cmd",
         "gguf_path": None,  # HF checkpoint auto-resolved by SGLang; no single-file disk check
         "start_cmd": (
-            'cd ~/sglang && . sglang-mps/bin/activate && '
+            'cd {stack}/sglang && . sglang-mps/bin/activate && '
             'nohup env SGLANG_USE_MLX=1 python -m sglang.launch_server '
             '--model-path openbmb/MiniCPM5-1B --tool-call-parser minicpm5 '
             '--host 0.0.0.0 --port 30000 > /tmp/sglang-minicpm5.log 2>&1 &'
@@ -251,18 +284,20 @@ LAUNCH_RECIPES = [
 
 # Stop EVERY LLM server before starting the target (Event-4-style hygiene → frees
 # unified memory). Mirrors the CLAUDE.md pre-benchmark hygiene block, plus lms teardown.
-STOP_ALL_CMD = (
-    "pkill -f vllm-mlx; pkill -f mlx-openai-server; pkill -f vmlx_engine; "
-    "pkill -f dflash-serve; pkill -f 'llama-cpp-mainline/build/bin/llama-server'; "
-    "pkill -f 'llama-cpp-mtp/build/bin/llama-server'; "
-    "pkill -f 'llama-cpp-turboquant/build/bin/llama-server'; "
-    "pkill -f 'llama-cpp-thetom/build/bin/llama-server'; "
-    "pkill -f 'mlx_lm.server'; pkill -f 'ds4-server'; pkill -f 'litert-lm serve'; "
-    "pkill -f 'sglang.launch_server'; pkill -f 'sglang serve'; pkill -9 osaurus 2>/dev/null; "
-    "if [ -x ~/.lmstudio/bin/lms ]; then ~/.lmstudio/bin/lms unload --all 2>/dev/null; "
-    "~/.lmstudio/bin/lms server stop 2>/dev/null; fi; "
-    "/opt/homebrew/bin/brew services stop omlx 2>/dev/null; sleep 3"
-)
+def stop_all_cmd(lms_dir):
+    lms = f"{lms_dir}/bin/lms"
+    return (
+        "pkill -f vllm-mlx; pkill -f mlx-openai-server; pkill -f vmlx_engine; "
+        "pkill -f dflash-serve; pkill -f 'llama-cpp-mainline/build/bin/llama-server'; "
+        "pkill -f 'llama-cpp-mtp/build/bin/llama-server'; "
+        "pkill -f 'llama-cpp-turboquant/build/bin/llama-server'; "
+        "pkill -f 'llama-cpp-thetom/build/bin/llama-server'; "
+        "pkill -f 'mlx_lm.server'; pkill -f 'ds4-server'; pkill -f 'litert-lm serve'; "
+        "pkill -f 'sglang.launch_server'; pkill -f 'sglang serve'; pkill -9 osaurus 2>/dev/null; "
+        f"if [ -x {lms} ]; then {lms} unload --all 2>/dev/null; "
+        f"{lms} server stop 2>/dev/null; fi; "
+        "/opt/homebrew/bin/brew services stop omlx 2>/dev/null; sleep 3"
+    )
 
 
 # ---------- benchmark table parser ----------
@@ -393,6 +428,30 @@ def parse_benchmark_table():
     return groups
 
 
+def render_recipe(rec, stack_dir, models_dir):
+    """Return a copy of `rec` with `{stack}` / `{models}` expanded in its path fields.
+
+    Done once, right after selection, so every downstream consumer (disk check, launch,
+    log tail, dry-run echo) sees real paths and needs no knowledge of the placeholders.
+    Trailing slashes are trimmed off the roots — `~/Stack/` must not yield `~/Stack//…`.
+    """
+    stack = stack_dir.rstrip("/") or "/"
+    models = models_dir.rstrip("/") or "/"
+
+    def sub(v):
+        if isinstance(v, str):
+            return v.replace("{stack}", stack).replace("{models}", models)
+        if isinstance(v, list):
+            return [sub(x) for x in v]
+        return v
+
+    out = dict(rec)
+    for field in ("start_cmd", "gguf_path"):
+        if field in out:
+            out[field] = sub(out[field])
+    return out
+
+
 def match_recipe(row):
     """Return the LAUNCH_RECIPES entry for a parsed row, or None."""
     name_l = row["name"].lower()
@@ -494,6 +553,16 @@ def resolve_selection(groups, tkey, n):
 
 # ---------- remote helpers ----------
 
+def _ssh_argv(host, cmd):
+    """Wrap a remote command in `bash -lc` so it runs under bash with a login PATH.
+
+    A host whose login shell is fish (e.g. scotland) rejects the bash syntax used in
+    stop_all_cmd() and the recipe start_cmds (`VAR=val; …`, `if [ -x … ]; then … fi`).
+    Forcing bash makes every remote command portable; harmless on bash-login hosts.
+    """
+    return ["ssh", host, "bash -lc " + shlex.quote(cmd)]
+
+
 def ssh(host, cmd, dry_run, timeout=600, check=False):
     if dry_run:
         print(f"[dry-run] ssh {host} \"{cmd}\"")
@@ -501,7 +570,7 @@ def ssh(host, cmd, dry_run, timeout=600, check=False):
     # One-line echo (long pkill/start commands collapsed to first ~120 chars for readability).
     echo = cmd if len(cmd) <= 120 else cmd[:117] + "..."
     dbg(f"ssh {host}: {echo}")
-    res = subprocess.run(["ssh", host, cmd], capture_output=True, text=True, timeout=timeout)
+    res = subprocess.run(_ssh_argv(host, cmd), capture_output=True, text=True, timeout=timeout)
     dbg(f"  rc={res.returncode}  stdout={_trunc(res.stdout)}  stderr={_trunc(res.stderr)}")
     if check and res.returncode != 0:
         print(f"Error: remote command failed ({res.returncode}): {cmd}\n{res.stderr.strip()}",
@@ -510,14 +579,15 @@ def ssh(host, cmd, dry_run, timeout=600, check=False):
     return res
 
 
-def check_on_disk(host, rec, dry_run):
+def check_on_disk(host, rec, dry_run, lms_dir):
     """True if the model is present on disk; False (with guidance) if missing."""
     if rec["kind"] == "lms":
+        lms_ls = f"{lms_dir}/bin/lms ls"
         if dry_run:
-            print(f"[dry-run] ssh {host} \"~/.lmstudio/bin/lms ls\"  # expect '{rec['lms_key']}'")
+            print(f"[dry-run] ssh {host} \"{lms_ls}\"  # expect '{rec['lms_key']}'")
             return True
-        dbg(f"check_on_disk(lms): ssh {host} \"~/.lmstudio/bin/lms ls\"")
-        res = subprocess.run(["ssh", host, "~/.lmstudio/bin/lms ls"],
+        dbg(f"check_on_disk(lms): ssh {host} \"{lms_ls}\"")
+        res = subprocess.run(_ssh_argv(host, lms_ls),
                              capture_output=True, text=True, timeout=30)
         key = rec["lms_key"].split("/")[-1].lower()
         listed = sum(1 for ln in res.stdout.splitlines() if ln.strip())
@@ -537,41 +607,53 @@ def check_on_disk(host, rec, dry_run):
         dbg(f"check_on_disk(remote-cmd): no gguf_path for '{rec['model_id']}' — "
             f"skipping disk check (HF checkpoint auto-resolves)")
         return True  # e.g. SGLang HF checkpoint auto-resolves; nothing to pre-check
+    # A list means "same blob, several possible homes" (model tree vs HF cache) — any hit passes.
+    cands = [gguf] if isinstance(gguf, str) else list(gguf)
+    test = " || ".join(f"test -e {c}" for c in cands)
     if dry_run:
-        print(f"[dry-run] ssh {host} \"test -e {gguf}\"")
+        print(f"[dry-run] ssh {host} \"{test}\"")
         return True
-    dbg(f"check_on_disk(remote-cmd): ssh {host} \"test -e {gguf}\"")
-    res = subprocess.run(["ssh", host, f"test -e {gguf} && echo OK || echo MISSING"],
+    dbg(f"check_on_disk(remote-cmd): ssh {host} \"{test}\"")
+    res = subprocess.run(_ssh_argv(host, f"{{ {test}; }} && echo OK || echo MISSING"),
                          capture_output=True, text=True, timeout=30)
     dbg(f"  rc={res.returncode}  → {res.stdout.strip() or '(no output)'}")
     if "OK" in res.stdout:
         return True
+    paths = "\n".join(f"    {c}" for c in cands)
     print(f"Model not on disk (likely removed by storage cleanup).\n"
-          f"  Expected path: {gguf}\n"
-          f"  Re-download via huggingface-cli / the recipe's source repo.", file=sys.stderr)
+          f"  Expected path{'s (any of)' if len(cands) > 1 else ''}:\n{paths}\n"
+          f"  Re-download via scripts/fetch.sh / the recipe's source repo.", file=sys.stderr)
     return False
 
 
-def set_guardrail(host, mode, dry_run):
-    """Flip LM Studio's modelLoadingGuardrails mode (off → load → high)."""
+def set_guardrail(host, mode, dry_run, lms_dir):
+    """Flip LM Studio's modelLoadingGuardrails mode (off → load → restore).
+
+    `lms_dir` may contain `~`; expansion happens on the remote (os.path.expanduser in the
+    remote python) so it resolves against the Mac Studio's home, not this MacBook's.
+    """
     one_liner = (
-        "python3 -c \"import json,pathlib; p=pathlib.Path.home()/'.lmstudio/settings.json'; "
-        "d=json.loads(p.read_text()); d.setdefault('modelLoadingGuardrails',{})['mode']='%s'; "
-        "p.write_text(json.dumps(d, indent=2))\"" % mode
+        "python3 -c \"import json,os,sys,pathlib; "
+        "p=pathlib.Path(os.path.expanduser(sys.argv[1]))/'settings.json'; "
+        "d=json.loads(p.read_text()); "
+        "d.setdefault('modelLoadingGuardrails',{})['mode']=sys.argv[2]; "
+        "p.write_text(json.dumps(d, indent=2))\" "
+        f"{shlex.quote(lms_dir)} {shlex.quote(mode)}"
     )
     ssh(host, one_liner, dry_run, timeout=30)
 
 
-def start_lms(host, rec, dry_run):
+def start_lms(host, rec, dry_run, lms_dir, guardrail_restore):
+    lms = f"{lms_dir}/bin/lms"
     guard = not rec.get("no_guardrail")
     if guard:
-        set_guardrail(host, "off", dry_run)
-    load = (f"~/.lmstudio/bin/lms load '{rec['lms_key']}' --gpu max "
+        set_guardrail(host, "off", dry_run, lms_dir)
+    load = (f"{lms} load '{rec['lms_key']}' --gpu max "
             f"--context-length {rec['context_length']} --identifier '{rec['model_id']}' -y")
     ssh(host, load, dry_run, timeout=600)
     if guard:
-        set_guardrail(host, "high", dry_run)
-    ssh(host, "~/.lmstudio/bin/lms server start --bind 0.0.0.0 --cors", dry_run, timeout=120)
+        set_guardrail(host, guardrail_restore, dry_run, lms_dir)
+    ssh(host, f"{lms} server start --bind 0.0.0.0 --cors", dry_run, timeout=120)
 
 
 def remote_log_path(rec):
@@ -587,7 +669,7 @@ def tail_remote_log(host, rec, dry_run, lines=12, label="log-tail"):
     log = remote_log_path(rec)
     if not log:
         return  # lms kind / no /tmp redirect — load errors already surface in the lms rc dump
-    res = subprocess.run(["ssh", host, f"tail -n {lines} {log} 2>/dev/null"],
+    res = subprocess.run(_ssh_argv(host, f"tail -n {lines} {log} 2>/dev/null"),
                          capture_output=True, text=True, timeout=20)
     body = res.stdout.strip()
     if not body:
@@ -720,7 +802,25 @@ def smoke_test(host_ip, rec, api_key, dry_run):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--ssh-host", default="macstudio", help="SSH alias (default: macstudio)")
+    ap.add_argument("--ssh-host", default=os.environ.get("MACSTUDIO_SSH_HOST", "macstudio"),
+                    help="SSH alias (default: macstudio, or $MACSTUDIO_SSH_HOST)")
+    ap.add_argument("--lms-dir", default=os.environ.get("MACSTUDIO_LMS_DIR", "~/.lmstudio"),
+                    help="LM Studio data dir on the host (default: ~/.lmstudio, or "
+                         "$MACSTUDIO_LMS_DIR; scotland uses ~/.cache/lm-studio)")
+    ap.add_argument("--guardrail-restore",
+                    default=os.environ.get("MACSTUDIO_GUARDRAIL_RESTORE", "high"),
+                    choices=["high", "medium", "off"],
+                    help="LM Studio guardrail mode to restore after a load (default: high, "
+                         "or $MACSTUDIO_GUARDRAIL_RESTORE; scotland's default is medium)")
+    ap.add_argument("--stack-dir", default=os.environ.get("MACSTUDIO_STACK_DIR", "~"),
+                    help="Root of the source-built runtimes on the host — llama.cpp forks, "
+                         "sglang (default: ~, or $MACSTUDIO_STACK_DIR; scotland uses ~/Stack). "
+                         "Populate it with scripts/install_stack.sh")
+    ap.add_argument("--models-dir", default=os.environ.get("MACSTUDIO_MODELS_DIR",
+                                                           "~/.lmstudio/models"),
+                    help="GGUF / MLX model tree on the host, i.e. LM Studio's downloadsFolder "
+                         "(default: ~/.lmstudio/models, or $MACSTUDIO_MODELS_DIR; scotland uses "
+                         "~/Models)")
     ap.add_argument("--pick", help="Non-interactive selection TYPE:N (e.g. moe:1)")
     ap.add_argument("--list", action="store_true", help="Print the top-5 menus and exit")
     ap.add_argument("--dry-run", action="store_true",
@@ -746,6 +846,8 @@ def main():
         tkey, n = interactive_select(groups)
 
     row, rec = resolve_selection(groups, tkey, n)
+    rec = render_recipe(rec, args.stack_dir, args.models_dir)
+    dbg(f"paths: stack={args.stack_dir}  models={args.models_dir}")
     print(f"\n→ {row['name']}  ({rec['server']} :{rec['port']}, id={rec['model_id']})")
     print(f"  benchmark: browse {fmt_secs(row['browse'])} / search {fmt_secs(row['search'])}\n")
 
@@ -777,14 +879,14 @@ def main():
             dbg(f"probe: {len(avail)} ids listed; target absent → full switch")
 
     # 2) Availability guard — before stopping anything.
-    if not check_on_disk(host, rec, args.dry_run):
+    if not check_on_disk(host, rec, args.dry_run, args.lms_dir):
         print("\nRunning server left untouched. Aborting.", file=sys.stderr)
         return 1
 
     # 3) Stop all LLM servers (free unified memory).
     print("Stopping all LLM servers...")
     t = time.time()
-    ssh(host, STOP_ALL_CMD, args.dry_run, timeout=120)
+    ssh(host, stop_all_cmd(args.lms_dir), args.dry_run, timeout=120)
     timings["stop"] = time.time() - t
     dbg(f"phase 'stop' took {timings['stop']:.1f}s")
 
@@ -792,7 +894,7 @@ def main():
     print(f"Starting {rec['server']}...")
     t = time.time()
     if rec["kind"] == "lms":
-        start_lms(host, rec, args.dry_run)
+        start_lms(host, rec, args.dry_run, args.lms_dir, args.guardrail_restore)
     else:
         start_remote_cmd(host, rec, args.dry_run)
     timings["load"] = time.time() - t
